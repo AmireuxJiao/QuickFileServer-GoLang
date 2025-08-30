@@ -3,8 +3,8 @@ G := \033[32m
 Y := \033[33m
 N := \033[0m
 
-BINARY := quick_server
-SRC    := ./cmd/main.go
+BINARY := file-server-cli
+SRC    := ./main.go
 BUILD  := build
 
 .PHONY: default
@@ -33,6 +33,10 @@ ifndef TAG
 	@exit 1
 endif
 	git tag -a $(TAG) -m "Release $(TAG)"
+
+.PHONY: run
+run: build	   		  ## 运行
+	go run $(SRC)
 
 %: %-help
 	@:
