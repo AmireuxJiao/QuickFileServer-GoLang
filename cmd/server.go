@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,26 +20,29 @@ import (
 var (
 	port int // 端口 flag
 	dir  string
-
-	serveCmd = &cobra.Command{
-		Use:   "serve",
-		Short: "start file server",
-
-		// args []string: file-server-cli server -p 123 /tmp --> [0]:[/tmp]
-		PreRun: func(cmd *cobra.Command, args []string) {
-			if port < 0 || port > 65535 {
-				logrus.Fatal("端口配置错误")
-				os.Exit(1)
-			}
-		},
-
-		RunE: runServe,
-	}
+	qr   string
 )
 
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "start file server",
+
+	// args []string: file-server-cli server -p 123 /tmp --> [0]:[/tmp]
+	PreRun: func(cmd *cobra.Command, args []string) {
+		if port < 0 || port > 65535 {
+			logrus.WithFields(logrus.Fields{
+				"port": port,
+			}).Fatal("端口配置错误")
+			os.Exit(1)
+		}
+	},
+	RunE: runServe,
+}
+
 func init() {
-	serveCmd.Flags().IntVarP(&port, "port", "p", 8000, "监听端口")
+	serveCmd.Flags().IntVarP(&port, "port", "p", 9999, "监听端口")
 	serveCmd.Flags().StringVarP(&dir, "dir", "d", ".", "文件服务器路径")
+	serveCmd.Flags().StringVarP(&qr, "qrcode", "q", "false", "生成二维码 (true, false, small)")
 	rootCmd.AddCommand(serveCmd)
 	logrus.Debug("add [server] command successfully")
 }
@@ -53,25 +57,51 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	logrus.Debug("  addrs = ", addrs)
+	logrus.WithFields(logrus.Fields{
+		"addrs": addrs,
+	}).Debug("获取网络地址")
 
 	var ips = getAllAccessibleAddr(addrs)
 	for _, ip := range ips {
-		logrus.Infof("  http://%s:%d", ip, port)
-		if err := generateQRCode(ip, port); err != nil {
-			logrus.Warnf("failed to generate QR code: %v", err)
+		logrus.WithFields(logrus.Fields{
+			"ip":   ip,
+			"port": port,
+		}).Infof("服务地址")
+
+		if qr != "false" {
+			smallQr := qr == "small"
+			if err := generateQRCode(ip, port, smallQr); err != nil {
+				logrus.WithFields(logrus.Fields{
+					"ip":    ip,
+					"port":  port,
+					"error": err,
+				}).Warnf("生成二维码失败")
+			}
 		}
 	}
 
 	ipAddr := fmt.Sprintf("0.0.0.0:%d", port)
-	logrus.Infof("Serving %s on http://%s", path, ipAddr)
+	logrus.WithFields(logrus.Fields{
+		"path": path,
+		"addr": ipAddr,
+	}).Infof("开始提供服务")
 
 	fs := http.FileServer(http.Dir(path))
-	serve := &http.Server{Addr: ipAddr, Handler: fs}
+
+	mux := http.NewServeMux()
+	mux.Handle("/", fs)
+
+	mux.HandleFunc("/list", listFiles)
+	mux.HandleFunc("/ping", ping)
+	mux.HandleFunc("/health", healthCheck)
+
+	serve := &http.Server{Addr: ipAddr, Handler: mux}
 
 	go func() {
 		if err := serve.ListenAndServe(); err != http.ErrServerClosed {
-			logrus.Fatalf("listen: %s", err)
+			logrus.WithFields(logrus.Fields{
+				"error": err,
+			}).Fatalf("监听失败")
 		}
 	}()
 
@@ -79,10 +109,43 @@ func runServe(cmd *cobra.Command, args []string) error {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logrus.Info("shutting down ...")
+	logrus.Info("接收到退出信号，正在关闭服务...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return serve.Shutdown(ctx)
+	if err := serve.Shutdown(ctx); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error": err,
+		}).Warnf("关闭服务失败")
+	} else {
+		logrus.Info("服务已成功关闭")
+	}
+
+	return nil
+}
+
+// 新增的 API 处理函数
+func listFiles(w http.ResponseWriter, r *http.Request) {
+	// http.Error(w, "Not implemented", http.StatusNotImplemented)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var fileList []string
+	for _, file := range files {
+		fileList = append(fileList, file.Name())
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(fileList)
+}
+
+func ping(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "PONG")
+}
+
+func healthCheck(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "OK")
 }
 
 func getAllAccessibleAddr(addrs []net.Addr) []string {

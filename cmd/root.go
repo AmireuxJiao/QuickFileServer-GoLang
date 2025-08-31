@@ -9,6 +9,9 @@ import (
 )
 
 const cliName = "flie-server-cli"
+const version = "0.1.0"
+
+var versionFlag bool
 
 var (
 	logLevel string // 全局 flag：日志级别
@@ -28,13 +31,16 @@ var (
 			})
 			logrus.SetOutput(os.Stdout)
 		},
+		Run: runRoot,
 	}
 )
 
 func init() {
 	// PersistentFlags()，作用范围：当前命令 + 所有子命令，常用于命令行的全局配置
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "debug",
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info",
 		"日志级别: debug, info, warn, error, fatal, panic")
+
+	rootCmd.Flags().BoolVarP(&versionFlag, "version", "v", false, "版本信息")
 }
 
 func Execute() {
@@ -42,5 +48,11 @@ func Execute() {
 		logrus.Fatal(err)
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func runRoot(cmd *cobra.Command, args []string) {
+	if versionFlag {
+		fmt.Printf("%s %s\n", cliName, version)
 	}
 }
