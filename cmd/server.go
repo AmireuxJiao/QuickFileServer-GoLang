@@ -17,28 +17,31 @@ import (
 )
 
 var (
-	port int // 端口 flag
-	dir  string
-
-	serveCmd = &cobra.Command{
-		Use:   "serve",
-		Short: "start file server",
-
-		// args []string: file-server-cli server -p 123 /tmp --> [0]:[/tmp]
-		PreRun: func(cmd *cobra.Command, args []string) {
-			if port < 0 || port > 65535 {
-				logrus.Fatal("端口配置错误")
-				os.Exit(1)
-			}
-		},
-
-		RunE: runServe,
-	}
+	port    int // 端口 flag
+	dir     string
+	qr      bool
+	smallQr bool
 )
 
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "start file server",
+
+	// args []string: file-server-cli server -p 123 /tmp --> [0]:[/tmp]
+	PreRun: func(cmd *cobra.Command, args []string) {
+		if port < 0 || port > 65535 {
+			logrus.Fatal("端口配置错误")
+			os.Exit(1)
+		}
+	},
+	RunE: runServe,
+}
+
 func init() {
-	serveCmd.Flags().IntVarP(&port, "port", "p", 8000, "监听端口")
+	serveCmd.Flags().IntVarP(&port, "port", "p", 9999, "监听端口")
 	serveCmd.Flags().StringVarP(&dir, "dir", "d", ".", "文件服务器路径")
+	serveCmd.Flags().BoolVarP(&qr, "qrcode", "q", false, "生成二维码")
+	serveCmd.Flags().BoolVarP(&smallQr, "small-qr", "", true, "生成小型二维码")
 	rootCmd.AddCommand(serveCmd)
 	logrus.Debug("add [server] command successfully")
 }
@@ -58,8 +61,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	var ips = getAllAccessibleAddr(addrs)
 	for _, ip := range ips {
 		logrus.Infof("  http://%s:%d", ip, port)
-		if err := generateQRCode(ip, port); err != nil {
-			logrus.Warnf("failed to generate QR code: %v", err)
+
+		if qr {
+			if err := generateQRCode(ip, port, smallQr); err != nil {
+				logrus.Warnf("failed to generate QR code: %v", err)
+			}
 		}
 	}
 
@@ -100,12 +106,17 @@ func getAllAccessibleAddr(addrs []net.Addr) []string {
 	return ips
 }
 
-func generateQRCode(ip string, port int) error {
+func generateQRCode(ip string, port int, smallQr bool) error {
 	qrCode, err := qrcode.New(fmt.Sprintf("http://%s:%d", ip, port), qrcode.Medium)
 	if err != nil {
 		logrus.Fatalf("generate [QR] code error:%s", err)
-		return err
 	}
-	fmt.Print(qrCode.ToString(true))
+
+	if smallQr {
+		fmt.Print(qrCode.ToSmallString(true))
+	} else {
+		fmt.Print(qrCode.ToString(true))
+	}
+
 	return nil
 }
