@@ -33,7 +33,7 @@ var (
 
 func init() {
 	// PersistentFlags()，作用范围：当前命令 + 所有子命令，常用于命令行的全局配置
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info",
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "debug",
 		"日志级别: debug, info, warn, error, fatal, panic")
 }
 
