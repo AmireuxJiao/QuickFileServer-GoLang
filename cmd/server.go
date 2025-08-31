@@ -123,6 +123,40 @@ func runServe(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func getAllAccessibleAddr(addrs []net.Addr) []string {
+	var ips []string
+
+	for _, a := range addrs {
+		if ipNet, ok := a.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+			ips = append(ips, ipNet.IP.String())
+		}
+	}
+
+	if len(ips) == 0 {
+		ips = []string{"127.0.0.1"} // fallback
+	}
+	return ips
+}
+
+func generateQRCode(ip string, port int, smallQr bool) error {
+	qrCode, err := qrcode.New(fmt.Sprintf("http://%s:%d", ip, port), qrcode.Medium)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"ip":    ip,
+			"port":  port,
+			"error": err,
+		}).Fatalf("生成二维码失败")
+	}
+
+	if smallQr {
+		fmt.Print(qrCode.ToSmallString(true))
+	} else {
+		fmt.Print(qrCode.ToString(true))
+	}
+
+	return nil
+}
+
 // 新增的 API 处理函数
 func listFiles(w http.ResponseWriter, r *http.Request) {
 	// http.Error(w, "Not implemented", http.StatusNotImplemented)
@@ -146,29 +180,4 @@ func ping(w http.ResponseWriter, r *http.Request) {
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "OK")
-}
-
-func getAllAccessibleAddr(addrs []net.Addr) []string {
-	var ips []string
-
-	for _, a := range addrs {
-		if ipNet, ok := a.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
-			ips = append(ips, ipNet.IP.String())
-		}
-	}
-
-	if len(ips) == 0 {
-		ips = []string{"127.0.0.1"} // fallback
-	}
-	return ips
-}
-
-func generateQRCode(ip string, port int) error {
-	qrCode, err := qrcode.New(fmt.Sprintf("http://%s:%d", ip, port), qrcode.Medium)
-	if err != nil {
-		logrus.Fatalf("generate [QR] code error:%s", err)
-		return err
-	}
-	fmt.Print(qrCode.ToString(true))
-	return nil
 }
