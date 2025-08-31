@@ -17,10 +17,10 @@ import (
 )
 
 var (
-	port    int // 端口 flag
-	dir     string
-	qr      bool
-	smallQr bool
+	port int // 端口 flag
+	dir  string
+	qr   string
+	// smallQr bool
 )
 
 var serveCmd = &cobra.Command{
@@ -40,8 +40,7 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().IntVarP(&port, "port", "p", 9999, "监听端口")
 	serveCmd.Flags().StringVarP(&dir, "dir", "d", ".", "文件服务器路径")
-	serveCmd.Flags().BoolVarP(&qr, "qrcode", "q", false, "生成二维码")
-	serveCmd.Flags().BoolVarP(&smallQr, "small-qr", "", true, "生成小型二维码")
+	serveCmd.Flags().StringVarP(&qr, "qrcode", "q", "false", "生成二维码 (true, false, small)")
 	rootCmd.AddCommand(serveCmd)
 	logrus.Debug("add [server] command successfully")
 }
@@ -62,7 +61,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	for _, ip := range ips {
 		logrus.Infof("  http://%s:%d", ip, port)
 
-		if qr {
+		if qr != "false" {
+			smallQr := qr == "small"
 			if err := generateQRCode(ip, port, smallQr); err != nil {
 				logrus.Warnf("failed to generate QR code: %v", err)
 			}
