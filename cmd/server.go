@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
 )
 
@@ -47,6 +49,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return err
+	}
+	logrus.Debug("  addrs = ", addrs)
+
+	var ips = getAllAccessibleAddr(addrs)
+	for _, ip := range ips {
+		logrus.Infof("  http://%s:%d", ip, port)
+		if err := generateQRCode(ip, port); err != nil {
+			logrus.Warnf("failed to generate QR code: %v", err)
+		}
+	}
+
 	ipAddr := fmt.Sprintf("0.0.0.0:%d", port)
 	logrus.Infof("Serving %s on http://%s", path, ipAddr)
 
@@ -67,4 +83,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return serve.Shutdown(ctx)
+}
+
+func getAllAccessibleAddr(addrs []net.Addr) []string {
+	var ips []string
+
+	for _, a := range addrs {
+		if ipNet, ok := a.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+			ips = append(ips, ipNet.IP.String())
+		}
+	}
+
+	if len(ips) == 0 {
+		ips = []string{"127.0.0.1"} // fallback
+	}
+	return ips
+}
+
+func generateQRCode(ip string, port int) error {
+	qrCode, err := qrcode.New(fmt.Sprintf("http://%s:%d", ip, port), qrcode.Medium)
+	if err != nil {
+		logrus.Fatalf("generate [QR] code error:%s", err)
+		return err
+	}
+	fmt.Print(qrCode.ToString(true))
+	return nil
 }
