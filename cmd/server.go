@@ -59,12 +59,15 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	// path:当前文件服务器的工作地址
 	path, err := filepath.Abs(dir)
 	if err != nil {
 		return err
 	}
 	rootPath = path
+	logrus.Debug("filepath.Abs(dir) : path = ", path)
 
+	// net.InterfaceAddrs:
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return err
@@ -82,12 +85,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 		if qr != "false" {
 			smallQr := qr == "small"
-			if err := generateQRCode(ip, port, smallQr); err != nil {
+			if qrCode, err := generateQRCode(ip, port); err != nil {
 				logrus.WithFields(logrus.Fields{
 					"ip":    ip,
 					"port":  port,
 					"error": err,
 				}).Warnf("生成二维码失败")
+			} else { // 正常生成二维码
+				if smallQr {
+					fmt.Print(qrCode.ToSmallString(true))
+				} else {
+					fmt.Print(qrCode.ToString(true))
+				}
 			}
 		}
 	}
@@ -173,7 +182,7 @@ func getAllAccessibleAddr(addrs []net.Addr) []string {
 	return ips
 }
 
-func generateQRCode(ip string, port int, smallQr bool) error {
+func generateQRCode(ip string, port int) (*qrcode.QRCode, error) {
 	qrCode, err := qrcode.New(fmt.Sprintf("http://%s:%d/files", ip, port), qrcode.Medium)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
@@ -181,15 +190,10 @@ func generateQRCode(ip string, port int, smallQr bool) error {
 			"port":  port,
 			"error": err,
 		}).Fatalf("生成二维码失败")
+		return nil, err
 	}
 
-	if smallQr {
-		fmt.Print(qrCode.ToSmallString(true))
-	} else {
-		fmt.Print(qrCode.ToString(true))
-	}
-
-	return nil
+	return qrCode, nil
 }
 
 func listFiles(c *gin.Context) {
