@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
@@ -80,22 +80,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	r := gin.Default()
+	r.StaticFS("/files", http.Dir(path))
+
+	r.GET("/list", listFiles)
+	r.GET("/ping", ping)
+	r.GET("/health", healthCheck)
+
 	ipAddr := fmt.Sprintf("0.0.0.0:%d", port)
 	logrus.WithFields(logrus.Fields{
 		"path": path,
 		"addr": ipAddr,
 	}).Infof("开始提供服务")
 
-	fs := http.FileServer(http.Dir(path))
-
-	mux := http.NewServeMux()
-	mux.Handle("/", fs)
-
-	mux.HandleFunc("/list", listFiles)
-	mux.HandleFunc("/ping", ping)
-	mux.HandleFunc("/health", healthCheck)
-
-	serve := &http.Server{Addr: ipAddr, Handler: mux}
+	serve := &http.Server{
+		Addr:    ipAddr,
+		Handler: r,
+	}
 
 	go func() {
 		if err := serve.ListenAndServe(); err != http.ErrServerClosed {
@@ -157,12 +158,10 @@ func generateQRCode(ip string, port int, smallQr bool) error {
 	return nil
 }
 
-// 新增的 API 处理函数
-func listFiles(w http.ResponseWriter, r *http.Request) {
-	// http.Error(w, "Not implemented", http.StatusNotImplemented)
+func listFiles(c *gin.Context) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -170,14 +169,13 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 	for _, file := range files {
 		fileList = append(fileList, file.Name())
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(fileList)
+	c.JSON(http.StatusOK, fileList)
 }
 
-func ping(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "PONG")
+func ping(c *gin.Context) {
+	c.String(http.StatusOK, "PONG")
 }
 
-func healthCheck(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "OK")
+func healthCheck(c *gin.Context) {
+	c.String(http.StatusOK, "OK")
 }
