@@ -3,11 +3,13 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,14 +20,22 @@ import (
 )
 
 var (
-	port int // 端口 flag
-	dir  string
-	qr   string
+	port     int // 端口 flag
+	dir      string
+	qr       string
+	rootPath string
 )
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "start file server",
+	Long: `Start a file server to share files in the specified directory via HTTP.
+Examples:
+  # Start server on port 8080, share current directory, and generate QR code
+  file-server-cli serve -p 8080 -d . -q true
+
+  # Start server with default port (9999) and share /tmp directory
+  file-server-cli serve -d /tmp`,
 
 	// args []string: file-server-cli server -p 123 /tmp --> [0]:[/tmp]
 	PreRun: func(cmd *cobra.Command, args []string) {
@@ -42,7 +52,8 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().IntVarP(&port, "port", "p", 9999, "监听端口")
 	serveCmd.Flags().StringVarP(&dir, "dir", "d", ".", "文件服务器路径")
-	serveCmd.Flags().StringVarP(&qr, "qrcode", "q", "false", "生成二维码 (true, false, small)")
+	serveCmd.Flags().StringVarP(&qr, "qrcode", "q", "false",
+		"生成URL二维码访问图 (values: 'false' (disable), 'true' (normal size), 'small' (compact size))")
 	rootCmd.AddCommand(serveCmd)
 	logrus.Debug("add [server] command successfully")
 }
@@ -52,6 +63,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	rootPath = path
 
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -81,11 +93,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	r := gin.Default()
-	r.StaticFS("/files", http.Dir(path))
+	// 修复后代码
+	r.GET("/files/*filepath", preventPathTraversal(path), func(ctx *gin.Context) {
+		realFilePath := strings.TrimPrefix(ctx.Request.URL.Path, "/files")
+		if realFilePath == "" {
+			realFilePath = "/"
+		}
+		ctx.Request.URL.Path = realFilePath
+		http.FileServer(http.Dir(path)).ServeHTTP(ctx.Writer, ctx.Request)
+	})
 
 	r.GET("/list", listFiles)
 	r.GET("/ping", ping)
 	r.GET("/health", healthCheck)
+	r.POST("/upload", uploadFile)
 
 	ipAddr := fmt.Sprintf("0.0.0.0:%d", port)
 	logrus.WithFields(logrus.Fields{
@@ -124,6 +145,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func preventPathTraversal(rootDir string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 获取用户请求的相对路径（如 "subdir/file.txt" 或 "../../etc/passwd"）
+		reqPath := c.Param("filepath") // 需在路由中定义占位符，如 "/files/*filepath"
+		fullPath := filepath.Join(rootDir, reqPath)
+		if !strings.HasPrefix(fullPath, rootDir) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid path"})
+			return
+		}
+		c.Next()
+	}
+}
+
 func getAllAccessibleAddr(addrs []net.Addr) []string {
 	var ips []string
 
@@ -140,7 +174,7 @@ func getAllAccessibleAddr(addrs []net.Addr) []string {
 }
 
 func generateQRCode(ip string, port int, smallQr bool) error {
-	qrCode, err := qrcode.New(fmt.Sprintf("http://%s:%d", ip, port), qrcode.Medium)
+	qrCode, err := qrcode.New(fmt.Sprintf("http://%s:%d/files", ip, port), qrcode.Medium)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"ip":    ip,
@@ -178,4 +212,29 @@ func ping(c *gin.Context) {
 
 func healthCheck(c *gin.Context) {
 	c.String(http.StatusOK, "OK")
+}
+
+func uploadFile(c *gin.Context) {
+	c.Request.ParseMultipartForm(100 << 20) // 100MB
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "get file failed"})
+	}
+	defer file.Close()
+
+	savePath := filepath.Join(rootPath, header.Filename)
+	if !strings.HasPrefix(savePath, rootPath) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid filename"})
+		return
+	}
+
+	output, err := os.Create(savePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "create file failed: " + err.Error()})
+		return
+	}
+	defer output.Close()
+	io.Copy(output, file)
+
+	c.JSON(http.StatusOK, gin.H{"message": "file uploaded successfully", "filename": header.Filename})
 }
