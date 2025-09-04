@@ -9,8 +9,9 @@ SRC    := ./main.go
 BUILD  := build
 
 # 新增：测试相关变量（避免硬编码）
-COVER_PROFILE := coverage.out  # 覆盖率数据文件
-COVER_HTML    := coverage.html # 可视化覆盖率报告
+DOCS		  := docs
+COVER_PROFILE := $(DOCS)/coverage.out  # 覆盖率数据文件
+COVER_HTML    := $(DOCS)/coverage.html # 可视化覆盖率报告
 TEST_PATH     := ./cmd/...     # 测试文件路径（cmd目录下所有测试）
 
 .PHONY: default
@@ -66,6 +67,7 @@ test-cover: deps      ## 运行测试并生成文本覆盖率报告
 
 .PHONY: test-cover-html
 test-cover-html: test-cover  ## 生成可视化HTML覆盖率报告
+	mkdir -p $(DOCS)
 	@echo "$(G)Generating HTML coverage report...$(N)"
 	go tool cover -html=$(COVER_PROFILE) -o=$(COVER_HTML)
 	@echo "$(G)HTML report saved to: $(COVER_HTML) (open with browser)$(N)"
