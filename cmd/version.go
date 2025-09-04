@@ -14,7 +14,7 @@ var versionCmd = &cobra.Command{
 	Short: "print version ",
 	Run: func(cmd *cobra.Command, args []string) {
 		logrus.WithField("version", Version).Debug("current version")
-		fmt.Println(cliName, " ", Version)
+		fmt.Println(cliName, Version)
 	},
 }
 
